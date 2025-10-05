@@ -1,0 +1,828 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WhatsApp1</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Babel for in-browser JSX/TS transpilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Import Map for loading modules from a CDN -->
+    <script type="importmap">
+    {
+      "imports": {
+        "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+        "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+        "firebase/database": "https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js",
+        "firebase/storage": "https://www.gstatic.com/firebasejs/10.8.0/firebase-storage.js",
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "react": "https://esm.sh/react@18.2.0",
+        "qrcode.react": "https://esm.sh/qrcode.react@3.1.0"
+      }
+    }
+    </script>
+</head>
+<body>
+    <noscript>You need to enable JavaScript to run this app.</noscript>
+    <div id="root"></div>
+    
+    <!-- Main Application Script -->
+    <script type="text/babel" data-type="module">
+        // Import external libraries from CDN via importmap
+        import React, { useState, useEffect, createContext, useContext } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import { QRCodeSVG } from 'qrcode.react';
+        
+        // Firebase imports
+        import { initializeApp } from "firebase/app";
+        import {
+            getAuth,
+            onAuthStateChanged,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword,
+            GoogleAuthProvider,
+            signInWithPopup,
+            signOut,
+            updateProfile as updateFirebaseProfile,
+        } from 'firebase/auth';
+        import {
+            getDatabase,
+            ref,
+            set,
+            get,
+            push,
+            onValue,
+            query,
+            orderByChild,
+            equalTo,
+            remove,
+            onDisconnect,
+            serverTimestamp,
+            update,
+            off
+        } from 'firebase/database';
+        import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+
+        // --- GLOBAL TYPES & CONTEXT ---
+        const UserContext = createContext(null);
+        
+        const ActiveTab = {
+            Home: 'Home',
+            Requests: 'Requests',
+            Community: 'Community',
+            Calls: 'Calls',
+            Settings: 'Settings',
+        };
+
+        // --- ICON COMPONENTS ---
+        const HomeIcon = (props) => (
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h7.5" />
+          </svg>
+        );
+
+        const UserPlusIcon = (props) => (
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM4 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 0110.5 21.75c-2.676 0-5.216-.584-7.5-1.636z" />
+          </svg>
+        );
+
+        const UsersIcon = (props) => (
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m-7.5-2.962a3.75 3.75 0 100-7.5 3.75 3.75 0 000 7.5zM12 15.75a3.75 3.75 0 100-7.5 3.75 3.75 0 000 7.5zM3 13.5a3.75 3.75 0 100-7.5 3.75 3.75 0 000 7.5zM3 13.5v2.25A2.25 2.25 0 005.25 18v.75a2.25 2.25 0 002.25 2.25h1.5a2.25 2.25 0 002.25-2.25v-.75a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 13.5z" />
+          </svg>
+        );
+
+        const PhoneIcon = (props) => (
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z" />
+          </svg>
+        );
+
+        const Cog6ToothIcon = (props) => (
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.438.995s.145.755.438.995l1.003.827c.424.35.534.954.26 1.431l-1.296 2.247a1.125 1.125 0 01-1.37.49l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.333.183-.582.495-.645.87l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.063-.374-.313-.686-.645-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.37-.49l-1.296-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.437-.995s-.145-.755-.437-.995l-1.004-.827a1.125 1.125 0 01-.26-1.431l1.296-2.247a1.125 1.125 0 011.37-.49l1.217.456c.355.133.75.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.645-.87l.213-1.281z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+          </svg>
+        );
+
+        const QrCodeIcon = (props) => (
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 013.75 9.375v-4.5zM3.75 14.625c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5a1.125 1.125 0 01-1.125-1.125v-4.5zM13.5 4.875c0-.621.504-1.125 1.125-1.125h4.5c.621 0 1.125.504 1.125 1.125v4.5c0 .621-.504 1.125-1.125 1.125h-4.5A1.125 1.125 0 0113.5 9.375v-4.5z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M14.625 15.75h4.5a.375.375 0 00.375-.375v-4.5a.375.375 0 00-.375-.375h-4.5a.375.375 0 00-.375.375v4.5a.375.375 0 00.375.375z" />
+          </svg>
+        );
+
+        const ArrowLeftOnRectangleIcon = (props) => (
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+          </svg>
+        );
+
+        const PencilIcon = (props) => (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125" />
+            </svg>
+        );
+
+        const MagnifyingGlassIcon = (props) => (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z" />
+            </svg>
+        );
+
+        const VideoCameraIcon = (props) => (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 10.5l4.72-4.72a.75.75 0 011.28.53v11.38a.75.75 0 01-1.28.53l-4.72-4.72M4.5 18.75h9a2.25 2.25 0 002.25-2.25v-9A2.25 2.25 0 0013.5 5.25h-9A2.25 2.25 0 002.25 7.5v9A2.25 2.25 0 004.5 18.75z" />
+            </svg>
+        );
+
+        const EllipsisVerticalIcon = (props) => (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 6.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 12.75a.75.75 0 110-1.5.75.75 0 010 1.5zM12 18.75a.75.75 0 110-1.5.75.75 0 010 1.5z" />
+            </svg>
+        );
+
+        const PaperAirplaneIcon = (props) => (
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" {...props}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
+            </svg>
+        );
+
+        // --- FIREBASE SERVICE ---
+        const firebaseConfig = {
+            apiKey: "AIzaSyCy6XGeIVDSsfmj23Vh4qxisKIM2eXmVl0",
+            authDomain: "whatsapp1-5f96e.firebaseapp.com",
+            databaseURL: "https://whatsapp1-5f96e-default-rtdb.firebaseio.com",
+            projectId: "whatsapp1-5f96e",
+            storageBucket: "whatsapp1-5f96e.appspot.com",
+            messagingSenderId: "740405155727",
+            appId: "1:740405155727:web:42539d59fb405074ba1dfa"
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getDatabase(app);
+        const storage = getStorage(app);
+        const googleProvider = new GoogleAuthProvider();
+
+        const signUp = (email, password) => createUserWithEmailAndPassword(auth, email, password);
+        const signIn = (email, password) => signInWithEmailAndPassword(auth, email, password);
+        const signInWithGoogle = () => signInWithPopup(auth, googleProvider);
+        const doSignOut = () => signOut(auth);
+
+        const getUserProfile = async (uid) => {
+            const snapshot = await get(ref(db, `users/${uid}`));
+            return snapshot.exists() ? snapshot.val() : null;
+        };
+        
+        const findUserByPublicId = async (publicId) => {
+            const usersRef = ref(db, 'users');
+            const q = query(usersRef, orderByChild('publicId'), equalTo(publicId));
+            const snapshot = await get(q);
+            if (snapshot.exists()) {
+                const userData = snapshot.val();
+                const uid = Object.keys(userData)[0];
+                return userData[uid];
+            }
+            return null;
+        };
+        
+        const generatePublicId = async () => {
+            let publicId;
+            let userExists = true;
+            while (userExists) {
+                publicId = Math.floor(10000 + Math.random() * 90000).toString();
+                const user = await findUserByPublicId(publicId);
+                userExists = !!user;
+            }
+            return publicId;
+        };
+
+        const createUserProfile = async (user, displayName) => {
+            const existingProfile = await getUserProfile(user.uid);
+            if (existingProfile) return existingProfile;
+
+            const publicId = await generatePublicId();
+            const newUserProfile = {
+                uid: user.uid,
+                publicId,
+                displayName: displayName || user.displayName || user.email?.split('@')[0] || 'Anonymous',
+                email: user.email,
+                photoURL: user.photoURL || `https://i.pravatar.cc/150?u=${user.uid}`,
+            };
+            await set(ref(db, `users/${user.uid}`), newUserProfile);
+            return newUserProfile;
+        };
+
+        const updateUserProfile = async (uid, data) => {
+            if (auth.currentUser && auth.currentUser.uid === uid) {
+                await updateFirebaseProfile(auth.currentUser, data);
+            }
+            return update(ref(db, `users/${uid}`), data);
+        };
+
+        const uploadAvatar = async (uid, file) => {
+            const fileRef = storageRef(storage, `avatars/${uid}/${file.name}`);
+            await uploadBytes(fileRef, file);
+            return getDownloadURL(fileRef);
+        };
+
+        const initializePresence = (uid) => {
+            const userStatusDatabaseRef = ref(db, `/users/${uid}`);
+            const isOfflineForDatabase = {
+                isOnline: false,
+                lastSeen: serverTimestamp(),
+            };
+            const isOnlineForDatabase = {
+                isOnline: true,
+                lastSeen: serverTimestamp(),
+            };
+
+            onValue(ref(db, '.info/connected'), (snapshot) => {
+                if (snapshot.val() === false) {
+                    return;
+                }
+                onDisconnect(userStatusDatabaseRef).update(isOfflineForDatabase).then(() => {
+                    update(userStatusDatabaseRef, isOnlineForDatabase);
+                });
+            });
+        };
+        
+        const sendFriendRequest = async (fromUid, toPublicId) => {
+            if (!toPublicId || !/^\d{5}$/.test(toPublicId)) throw new Error("Invalid 5-digit ID.");
+            const toUser = await findUserByPublicId(toPublicId);
+            if (!toUser) throw new Error("User not found");
+            if (toUser.uid === fromUid) throw new Error("You can't add yourself");
+
+            const requestRef = ref(db, `friend_requests/${toUser.uid}/${fromUid}`);
+            const snapshot = await get(requestRef);
+            if(snapshot.exists()) throw new Error("Request already sent");
+
+            const fromUser = await getUserProfile(fromUid);
+            if (!fromUser) throw new Error("Could not find sender profile");
+
+            return set(requestRef, {
+                fromUid,
+                fromDisplayName: fromUser.displayName,
+                fromPhotoURL: fromUser.photoURL,
+                timestamp: serverTimestamp(),
+            });
+        };
+
+        const onFriendRequestsValue = (uid, callback) => {
+            const requestsRef = ref(db, `friend_requests/${uid}`);
+            return onValue(requestsRef, (snapshot) => {
+                const requests = [];
+                snapshot.forEach((childSnapshot) => {
+                    requests.push({ id: childSnapshot.key, ...childSnapshot.val() });
+                });
+                callback(requests);
+            });
+        };
+
+        const acceptFriendRequest = async (currentUserUid, requestorUid) => {
+            await set(ref(db, `friends/${currentUserUid}/${requestorUid}`), true);
+            await set(ref(db, `friends/${requestorUid}/${currentUserUid}`), true);
+            return remove(ref(db, `friend_requests/${currentUserUid}/${requestorUid}`));
+        };
+
+        const rejectFriendRequest = (currentUserUid, requestorUid) => {
+            return remove(ref(db, `friend_requests/${currentUserUid}/${requestorUid}`));
+        };
+
+        // --- AUTH SCREEN COMPONENT ---
+        const AuthScreen = () => {
+            const [isLogin, setIsLogin] = useState(true);
+            const [email, setEmail] = useState('');
+            const [password, setPassword] = useState('');
+            const [displayName, setDisplayName] = useState('');
+            const [error, setError] = useState('');
+            const [loading, setLoading] = useState(false);
+
+            const handleSubmit = async (e) => {
+                e.preventDefault();
+                setError('');
+                setLoading(true);
+                try {
+                    if (isLogin) {
+                        await signIn(email, password);
+                    } else {
+                        if(!displayName) {
+                            setError('Display name is required for registration.');
+                            setLoading(false);
+                            return;
+                        }
+                        const userCredential = await signUp(email, password);
+                        await createUserProfile(userCredential.user, displayName);
+                    }
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleGoogleSignIn = async () => {
+                setError('');
+                setLoading(true);
+                try {
+                    const userCredential = await signInWithGoogle();
+                    await createUserProfile(userCredential.user);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            return (
+                <div className="flex items-center justify-center min-h-screen bg-gray-100 dark:bg-gray-900">
+                    <div className="w-full max-w-md p-8 space-y-8 bg-white rounded-lg shadow-md dark:bg-gray-800">
+                        <h2 className="text-2xl font-bold text-center text-gray-900 dark:text-white">
+                            {isLogin ? 'Welcome Back to WhatsApp1' : 'Join WhatsApp1'}
+                        </h2>
+                        <form className="mt-8 space-y-6" onSubmit={handleSubmit}>
+                            {!isLogin && (
+                                <input
+                                    type="text"
+                                    value={displayName}
+                                    onChange={(e) => setDisplayName(e.target.value)}
+                                    placeholder="Display Name"
+                                    required
+                                    className="w-full px-3 py-2 text-gray-900 bg-gray-200 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                                />
+                            )}
+                            <input
+                                type="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                placeholder="Email address"
+                                required
+                                className="w-full px-3 py-2 text-gray-900 bg-gray-200 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            />
+                            <input
+                                type="password"
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                placeholder="Password"
+                                required
+                                className="w-full px-3 py-2 text-gray-900 bg-gray-200 border border-gray-300 rounded-md focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                            />
+                            {error && <p className="text-sm text-red-500">{error}</p>}
+                            <button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-indigo-400"
+                            >
+                                {loading ? 'Processing...' : (isLogin ? 'Sign In' : 'Sign Up')}
+                            </button>
+                        </form>
+                        <div className="relative flex items-center justify-center">
+                            <div className="absolute inset-0 flex items-center">
+                                <div className="w-full border-t border-gray-300 dark:border-gray-600"></div>
+                            </div>
+                            <div className="relative flex justify-center text-sm">
+                                <span className="px-2 bg-white text-gray-500 dark:bg-gray-800 dark:text-gray-400">Or continue with</span>
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleGoogleSignIn}
+                            disabled={loading}
+                            className="w-full flex items-center justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 dark:bg-gray-700 dark:text-white dark:border-gray-600 dark:hover:bg-gray-600"
+                        >
+                            <svg className="w-5 h-5 mr-2" aria-hidden="true" focusable="false" data-prefix="fab" data-icon="google" role="img" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 488 512"><path fill="currentColor" d="M488 261.8C488 403.3 381.5 504 248 504 110.8 504 0 393.2 0 256S110.8 8 248 8c66.8 0 126 23.4 172.9 61.9l-67.7 67.7C314.6 100.5 283.5 84 248 84c-80.9 0-146.3 65.4-146.3 146.3S167.1 396.6 248 396.6c45.5 0 81.3-17.7 108.8-44.5 24.3-24.3 35.8-57.5 39.3-90.8H248v-73.4h239.5c1.6 13.2 2.5 27.1 2.5 41.5z"></path></svg>
+                            Sign in with Google
+                        </button>
+                        <p className="text-sm text-center text-gray-500 dark:text-gray-400">
+                            {isLogin ? "Don't have an account?" : "Already have an account?"}
+                            <button onClick={() => setIsLogin(!isLogin)} className="font-medium text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 ml-1">
+                                {isLogin ? 'Sign Up' : 'Sign In'}
+                            </button>
+                        </p>
+                    </div>
+                </div>
+            );
+        };
+        
+        // --- MAIN LAYOUT & SUB-COMPONENTS ---
+        const HomeScreen = ({ user, onChatSelect }) => {
+            return (
+                <div className="p-4">
+                    <h2 className="text-xl font-bold dark:text-white">Chats</h2>
+                    <div className="mt-4 space-y-2">
+                        <div onClick={() => onChatSelect({uid: 'friend1', displayName: "Jane Doe", photoURL: 'https://i.pravatar.cc/150?u=friend1', isOnline: true})} className="flex items-center p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer">
+                            <div className="relative">
+                                <img src="https://i.pravatar.cc/150?u=friend1" alt="Jane Doe" className="w-12 h-12 rounded-full"/>
+                                <span className="absolute bottom-0 right-0 block h-3 w-3 rounded-full bg-green-500 border-2 border-white dark:border-gray-800"></span>
+                            </div>
+                            <div className="ml-4 flex-1">
+                                <p className="font-semibold dark:text-white">Jane Doe</p>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">This is a placeholder chat.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const RequestsScreen = ({ user }) => {
+            const [requests, setRequests] = useState([]);
+            useEffect(() => {
+                if (!user?.uid) return;
+                const unsubscribe = onFriendRequestsValue(user.uid, setRequests);
+                return () => unsubscribe();
+            }, [user?.uid]);
+
+            return (
+                <div className="p-4">
+                    <h2 className="text-xl font-bold dark:text-white">Friend Requests</h2>
+                    <div className="mt-4 space-y-2">
+                        {requests.length === 0 ? <p className="text-gray-500 dark:text-gray-400">No new requests.</p> :
+                            requests.map(req => (
+                                <div key={req.id} className="flex items-center justify-between p-2 rounded-lg bg-gray-100 dark:bg-gray-800">
+                                    <div className="flex items-center">
+                                        <img src={req.fromPhotoURL} alt={req.fromDisplayName} className="w-10 h-10 rounded-full"/>
+                                        <p className="ml-3 font-semibold dark:text-white">{req.fromDisplayName}</p>
+                                    </div>
+                                    <div className="space-x-2">
+                                        <button onClick={() => acceptFriendRequest(user.uid, req.fromUid)} className="px-3 py-1 text-sm text-white bg-green-500 rounded-md hover:bg-green-600">Accept</button>
+                                        <button onClick={() => rejectFriendRequest(user.uid, req.fromUid)} className="px-3 py-1 text-sm text-white bg-red-500 rounded-md hover:bg-red-600">Reject</button>
+                                    </div>
+                                </div>
+                            ))
+                        }
+                    </div>
+                </div>
+            );
+        };
+        const CommunityScreen = ({ onChatSelect }) => {
+            return (
+                <div className="p-4">
+                    <h2 className="text-xl font-bold dark:text-white">Communities</h2>
+                    <div className="mt-4 space-y-2">
+                        <div onClick={() => onChatSelect({id: 'community1', name: 'React Developers', type: 'community'})} className="flex items-center p-2 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 cursor-pointer">
+                            <div className="w-12 h-12 rounded-full bg-indigo-500 flex items-center justify-center">
+                            <UsersIcon className="w-6 h-6 text-white"/>
+                            </div>
+                            <div className="ml-4 flex-1">
+                                <p className="font-semibold dark:text-white">React Developers</p>
+                                <p className="text-sm text-gray-500 dark:text-gray-400">Placeholder community chat...</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        const CallsScreen = () => {
+            return (
+                <div className="p-4">
+                    <h2 className="text-xl font-bold dark:text-white">Call History</h2>
+                    <div className="mt-4 space-y-4">
+                        <div className="flex items-center">
+                            <img src="https://i.pravatar.cc/150?u=friend1" alt="Jane Doe" className="w-10 h-10 rounded-full"/>
+                            <div className="ml-3 flex-1">
+                                <p className="font-semibold dark:text-white">Jane Doe</p>
+                                <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+                                <PhoneIcon className="w-4 h-4 mr-1 text-green-500"/>
+                                <span>Placeholder call history...</span>
+                                </div>
+                            </div>
+                            <VideoCameraIcon className="w-6 h-6 text-gray-500"/>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+        
+        const QRCodePopup = ({ user, onClose }) => (
+            <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" onClick={onClose}>
+                <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8 text-center" onClick={e => e.stopPropagation()}>
+                    <h3 className="text-lg font-bold mb-4 dark:text-white">Scan to Add Me</h3>
+                    <div className="p-2 bg-white inline-block">
+                        <QRCodeSVG value={JSON.stringify({publicId: user.publicId})} size={200} />
+                    </div>
+                    <p className="mt-4 text-gray-600 dark:text-gray-300">Your ID: {user.publicId}</p>
+                </div>
+            </div>
+        );
+
+        const SettingsScreen = ({ user }) => {
+            const [showQRCode, setShowQRCode] = useState(false);
+            return (
+                <div className="p-4 space-y-4">
+                    <h2 className="text-xl font-bold dark:text-white">Settings</h2>
+                    <button onClick={() => setShowQRCode(true)} className="w-full flex items-center p-3 text-left bg-gray-200 dark:bg-gray-800 rounded-lg hover:bg-gray-300 dark:hover:bg-gray-700">
+                        <QrCodeIcon className="w-6 h-6 mr-3 dark:text-white"/>
+                        <span className="dark:text-white">My QR Code</span>
+                    </button>
+                    <button onClick={doSignOut} className="w-full flex items-center p-3 text-left bg-red-100 dark:bg-red-900 rounded-lg hover:bg-red-200 dark:hover:bg-red-800">
+                        <ArrowLeftOnRectangleIcon className="w-6 h-6 mr-3 text-red-500 dark:text-red-300"/>
+                        <span className="text-red-500 dark:text-red-300">Logout</span>
+                    </button>
+
+                    {showQRCode && <QRCodePopup user={user} onClose={() => setShowQRCode(false)} />}
+                </div>
+            );
+        };
+        const FAB = ({ onClick, icon, 'aria-label': ariaLabel }) => (
+            <button onClick={onClick} aria-label={ariaLabel} className="absolute bottom-20 right-4 w-14 h-14 bg-indigo-600 text-white rounded-full shadow-lg flex items-center justify-center hover:bg-indigo-700">
+                {icon}
+            </button>
+        );
+
+        const Toast = ({ message, show }) => (
+            <div className={`fixed bottom-24 left-1/2 -translate-x-1/2 px-4 py-2 bg-gray-800 text-white rounded-md transition-opacity duration-300 ${show ? 'opacity-100' : 'opacity-0'} pointer-events-none`}>
+                {message}
+            </div>
+        );
+
+        const ProfilePopup = ({ user, onEdit, onLogout, onClose }) => (
+            <div className="fixed inset-0 bg-black bg-opacity-50 z-40" onClick={onClose}>
+                <div className="absolute top-16 right-4 w-72 bg-white dark:bg-gray-800 rounded-lg shadow-xl p-4 text-center" onClick={e => e.stopPropagation()}>
+                    <img src={user.photoURL} alt="Profile" className="w-20 h-20 rounded-full mx-auto mb-2"/>
+                    <h3 className="font-bold text-lg dark:text-white">{user.displayName}</h3>
+                    <p className="text-sm text-gray-500 dark:text-gray-400">{user.email}</p>
+                    <p className="text-sm mt-2 p-1 bg-gray-200 dark:bg-gray-700 rounded-md dark:text-gray-300">ID: {user.publicId}</p>
+                    <div className="mt-4 space-y-2">
+                        <button onClick={onEdit} className="w-full flex items-center justify-center p-2 text-sm text-white bg-indigo-500 rounded-md hover:bg-indigo-600">
+                            <PencilIcon className="w-4 h-4 mr-2"/>
+                            Edit Profile
+                        </button>
+                        <button onClick={onLogout} className="w-full flex items-center justify-center p-2 text-sm text-white bg-red-500 rounded-md hover:bg-red-600">
+                            <ArrowLeftOnRectangleIcon className="w-4 h-4 mr-2"/>
+                            Logout
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+
+        const EditProfilePopup = ({ user, onClose, showToast }) => {
+            const [displayName, setDisplayName] = useState(user.displayName);
+            const [avatarFile, setAvatarFile] = useState(null);
+            const [loading, setLoading] = useState(false);
+
+            const handleSave = async () => {
+                setLoading(true);
+                try {
+                    let photoURL = user.photoURL;
+                    if (avatarFile) {
+                        photoURL = await uploadAvatar(user.uid, avatarFile);
+                    }
+                    await updateUserProfile(user.uid, { displayName, photoURL });
+                    showToast("Profile updated successfully!");
+                    onClose();
+                } catch (error) {
+                    showToast("Failed to update profile.");
+                    console.error(error);
+                } finally {
+                    setLoading(false);
+                }
+            }
+            
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" onClick={onClose}>
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-lg font-bold mb-4 dark:text-white">Edit Profile</h3>
+                        <input type="file" accept="image/*" onChange={e => setAvatarFile(e.target.files?.[0] || null)} className="mb-4 w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100"/>
+                        <input type="text" value={displayName} onChange={e => setDisplayName(e.target.value)} className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"/>
+                        <div className="mt-4 flex justify-end space-x-2">
+                            <button onClick={onClose} className="px-4 py-2 rounded text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-600">Cancel</button>
+                            <button onClick={handleSave} disabled={loading} className="px-4 py-2 rounded text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400">
+                                {loading ? 'Saving...' : 'Save'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )
+        }
+
+        const AddFriendPopup = ({ user, onClose, showToast }) => {
+            const [friendId, setFriendId] = useState('');
+            const [loading, setLoading] = useState(false);
+            
+            const handleAdd = async () => {
+                if(!friendId) return;
+                setLoading(true);
+                try {
+                    await sendFriendRequest(user.uid, friendId);
+                    showToast("Friend request sent!");
+                    onClose();
+                } catch (error) {
+                    showToast(error.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+            
+            return (
+                <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center" onClick={onClose}>
+                    <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-6 w-full max-w-sm" onClick={e => e.stopPropagation()}>
+                        <h3 className="text-lg font-bold mb-4 dark:text-white">Add Friend</h3>
+                        <p className="text-sm text-gray-500 dark:text-gray-400 mb-2">Enter the 5-digit ID of the user you want to add.</p>
+                        <input type="text" value={friendId} onChange={e => setFriendId(e.target.value)} placeholder="12345" className="w-full p-2 border rounded dark:bg-gray-700 dark:border-gray-600 dark:text-white"/>
+                        <div className="mt-4 flex justify-end space-x-2">
+                            <button onClick={onClose} className="px-4 py-2 rounded text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-600">Cancel</button>
+                            <button onClick={handleAdd} disabled={loading} className="px-4 py-2 rounded text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400">
+                                {loading ? 'Adding...' : 'Add'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const ChatView = ({ chatInfo, user, onClose }) => {
+            return (
+                <div className="absolute top-0 right-0 w-full h-full bg-gray-100 dark:bg-gray-900 z-30 flex flex-col transition-transform transform translate-x-0">
+                    <header className="flex items-center p-3 border-b dark:border-gray-700 bg-white dark:bg-gray-800 shadow-sm">
+                        <button onClick={onClose} className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6 dark:text-white"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+                        </button>
+                        <img src={chatInfo.photoURL || `https://i.pravatar.cc/150?u=${chatInfo.id}`} alt={chatInfo.displayName || chatInfo.name} className="w-10 h-10 rounded-full ml-2"/>
+                        <div className="ml-3">
+                            <p className="font-semibold dark:text-white">{chatInfo.displayName || chatInfo.name}</p>
+                            {chatInfo.isOnline && <p className="text-xs text-green-500">Online</p>}
+                        </div>
+                        <div className="ml-auto flex space-x-4">
+                            <button className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 dark:text-white"><PhoneIcon className="w-6 h-6"/></button>
+                            <button className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 dark:text-white"><VideoCameraIcon className="w-6 h-6"/></button>
+                            <button className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 dark:text-white"><EllipsisVerticalIcon className="w-6 h-6"/></button>
+                        </div>
+                    </header>
+                    <main className="flex-1 overflow-y-auto p-4 space-y-4">
+                        <div className="flex justify-start"><div className="bg-white dark:bg-gray-700 dark:text-white rounded-lg p-3 max-w-xs">Hey there!</div></div>
+                        <div className="flex justify-end"><div className="bg-indigo-500 text-white rounded-lg p-3 max-w-xs">Hi! How are you?</div></div>
+                    </main>
+                    <footer className="p-2 border-t dark:border-gray-700 bg-white dark:bg-gray-800">
+                        <div className="flex items-center">
+                            <input type="text" placeholder="Type a message" className="flex-1 p-2 rounded-lg bg-gray-200 dark:bg-gray-700 dark:text-white focus:outline-none"/>
+                            <button className="ml-2 p-2 rounded-full bg-indigo-600 text-white">
+                                <PaperAirplaneIcon className="w-6 h-6"/>
+                            </button>
+                        </div>
+                    </footer>
+                </div>
+            );
+        }
+
+        const MainLayout = ({ user }) => {
+            const [activeTab, setActiveTab] = useState(ActiveTab.Home);
+            const [showProfilePopup, setShowProfilePopup] = useState(false);
+            const [showEditProfile, setShowEditProfile] = useState(false);
+            const [showAddFriend, setShowAddFriend] = useState(false);
+            const [activeChat, setActiveChat] = useState(null);
+            const [toast, setToast] = useState({ show: false, message: '' });
+
+            const showToast = (message) => {
+                setToast({ show: true, message });
+                setTimeout(() => setToast({ show: false, message: '' }), 3000);
+            };
+
+            const renderTabContent = () => {
+                switch (activeTab) {
+                    case ActiveTab.Home:
+                        return <HomeScreen user={user} onChatSelect={setActiveChat} />;
+                    case ActiveTab.Requests:
+                        return <RequestsScreen user={user} />;
+                    case ActiveTab.Community:
+                        return <CommunityScreen onChatSelect={setActiveChat} />;
+                    case ActiveTab.Calls:
+                        return <CallsScreen />;
+                    case ActiveTab.Settings:
+                        return <SettingsScreen user={user} />;
+                    default:
+                        return <HomeScreen user={user} onChatSelect={setActiveChat}/>;
+                }
+            };
+            
+            const renderFAB = () => {
+                switch (activeTab) {
+                    case ActiveTab.Home:
+                        return <FAB onClick={() => setShowAddFriend(true)} aria-label="Add Friend" icon={<UserPlusIcon className="w-7 h-7" />} />;
+                    case ActiveTab.Community:
+                        return <FAB onClick={() => {/* TODO: Create community logic */}} aria-label="Create Community" icon={<UsersIcon className="w-7 h-7" />} />;
+                    default:
+                        return null;
+                }
+            }
+
+            const navItems = [
+                { name: ActiveTab.Home, icon: HomeIcon },
+                { name: ActiveTab.Requests, icon: UserPlusIcon },
+                { name: ActiveTab.Community, icon: UsersIcon },
+                { name: ActiveTab.Calls, icon: PhoneIcon },
+                { name: ActiveTab.Settings, icon: Cog6ToothIcon },
+            ];
+
+            return (
+                <div className="h-full w-full max-w-lg mx-auto bg-white dark:bg-gray-800 flex flex-col relative overflow-hidden">
+                    <header className="flex items-center justify-between p-4 border-b dark:border-gray-700 shadow-sm">
+                        <h1 className="text-xl font-bold text-indigo-600 dark:text-indigo-400">WhatsApp1</h1>
+                        <div className="flex items-center space-x-4">
+                            <button className="p-1 text-gray-600 dark:text-gray-300 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                                <MagnifyingGlassIcon className="w-6 h-6"/>
+                            </button>
+                            <button onClick={() => setShowProfilePopup(true)}>
+                                <img src={user.photoURL} alt="Profile" className="w-8 h-8 rounded-full" />
+                            </button>
+                        </div>
+                    </header>
+                    
+                    <main className="flex-1 overflow-y-auto pb-16">
+                        {renderTabContent()}
+                    </main>
+                    
+                    <nav className="absolute bottom-0 left-0 right-0 bg-white dark:bg-gray-900 border-t dark:border-gray-700 flex justify-around p-2">
+                        {navItems.map(item => (
+                            <button key={item.name} onClick={() => setActiveTab(item.name)} className={`flex flex-col items-center p-2 rounded-lg ${activeTab === item.name ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                                <item.icon className="w-6 h-6" />
+                                <span className="text-xs mt-1">{item.name}</span>
+                            </button>
+                        ))}
+                    </nav>
+
+                    {renderFAB()}
+
+                    {showProfilePopup && <ProfilePopup user={user} onEdit={() => { setShowProfilePopup(false); setShowEditProfile(true); }} onLogout={doSignOut} onClose={() => setShowProfilePopup(false)} />}
+                    {showEditProfile && <EditProfilePopup user={user} onClose={() => setShowEditProfile(false)} showToast={showToast} />}
+                    {showAddFriend && <AddFriendPopup user={user} onClose={() => setShowAddFriend(false)} showToast={showToast} />}
+                    {activeChat && <ChatView chatInfo={activeChat} user={user} onClose={() => setActiveChat(null)} />}
+
+                    <Toast message={toast.message} show={toast.show} />
+                </div>
+            );
+        };
+
+        // --- ROOT APP COMPONENT ---
+        const App = () => {
+            const [firebaseUser, setFirebaseUser] = useState(null);
+            const [userProfile, setUserProfile] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            useEffect(() => {
+                const unsubscribe = onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        setFirebaseUser(user);
+                        const profile = await getUserProfile(user.uid);
+                        if (profile) {
+                            setUserProfile(profile);
+                            initializePresence(user.uid);
+                        } else {
+                            // This can happen on first Google sign-in
+                            const newProfile = await createUserProfile(user);
+                            setUserProfile(newProfile);
+                            initializePresence(user.uid);
+                        }
+                    } else {
+                        setFirebaseUser(null);
+                        setUserProfile(null);
+                    }
+                    setLoading(false);
+                });
+
+                return () => unsubscribe();
+            }, []);
+
+            if (loading) {
+                return (
+                    <div className="flex items-center justify-center h-screen bg-gray-900 text-white">
+                        <svg className="animate-spin h-8 w-8 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </div>
+                );
+            }
+
+            return (
+                <UserContext.Provider value={userProfile}>
+                    <div className="h-screen w-screen bg-gray-100 dark:bg-gray-900 font-sans">
+                        {firebaseUser && userProfile ? <MainLayout user={userProfile} /> : <AuthScreen />}
+                    </div>
+                </UserContext.Provider>
+            );
+        };
+
+        // --- RENDER THE APP ---
+        const rootElement = document.getElementById('root');
+        if (!rootElement) {
+            throw new Error("Could not find root element to mount to");
+        }
+
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(
+            <React.StrictMode>
+                <App />
+            </React.StrictMode>
+        );
+    </script>
+</body>
+</html>
